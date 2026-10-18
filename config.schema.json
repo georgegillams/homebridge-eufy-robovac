@@ -28,6 +28,21 @@
         "description": "Tuya/Eufy Device/Local Key (see: https://github.com/gtalusan/eufy-device-id-js)",
         "type": "string"
       },
+      "tuyaVersion": {
+        "title": "Tuya Protocol Version",
+        "description": "Tuya local protocol version. Use 3.3 for most RoboVacs (default). Use 3.5 for eufy Clean X8 Pro Hybrid (T2266) and X8 Pro SES (T2276).",
+        "type": "string",
+        "default": "3.3",
+        "enum": ["3.3", "3.4", "3.5"]
+      },
+      "stateRefreshInterval": {
+        "title": "State Refresh Interval (seconds)",
+        "description": "How often to poll the robot over local Tuya for state changes made in the Eufy app. App/cloud changes often do not push to the local connection. Default 15. Set to 0 to disable polling.",
+        "type": "integer",
+        "default": 15,
+        "minimum": 0,
+        "maximum": 300
+      },
       "roomSwitches": {
         "description": "Rooms - configure according to the eufy clean app.  These are optional.  If no rooms, then the Eufy Robovac will be configured for Auto mode.",
         "type": "array",

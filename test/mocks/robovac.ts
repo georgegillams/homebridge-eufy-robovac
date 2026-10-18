@@ -30,6 +30,9 @@ export interface MockRoboVac extends EventEmitter {
   autoReturn: ReturnType<typeof vi.fn>;
   setAutoReturn: ReturnType<typeof vi.fn>;
   refresh: ReturnType<typeof vi.fn>;
+  status: ReturnType<typeof vi.fn>;
+  supportsWorkStatus2Pause: ReturnType<typeof vi.fn>;
+  workStatus2: ReturnType<typeof vi.fn>;
   set: ReturnType<typeof vi.fn>;
   get: ReturnType<typeof vi.fn>;
 }
@@ -73,6 +76,11 @@ export function createMockRoboVac(overrides: Partial<{
   emitter.autoReturn = vi.fn().mockReturnValue(true);
   emitter.setAutoReturn = vi.fn().mockResolvedValue(undefined);
   emitter.refresh = vi.fn().mockResolvedValue(undefined);
+  emitter.status = vi.fn().mockImplementation(() => {
+    throw new Error('RoboVac does not support this command');
+  });
+  emitter.supportsWorkStatus2Pause = vi.fn().mockImplementation(() => Object.hasOwn(emitter.dps ?? {}, '122'));
+  emitter.workStatus2 = vi.fn().mockImplementation(() => emitter.dps?.['122'] ?? 'unknown');
   emitter.set = vi.fn().mockResolvedValue(undefined);
   emitter.get = vi.fn().mockResolvedValue(undefined);
 

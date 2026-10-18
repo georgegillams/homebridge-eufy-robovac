@@ -1,6 +1,6 @@
 {
   "name": "@george.talusan/homebridge-eufy-robovac",
-  "displayName": "Homebridge Plugin for Eufy Robovac",
+  "displayName": "Homebridge Plugin for Eufy Robovac (george.gillams)",
   "type": "module",
   "version": "1.0.1",
   "description": "Homebridge Plugin for Eufy Robovac",
@@ -21,7 +21,9 @@
     "robovac",
     "smartvac",
     "matter",
-    "thread"
+    "thread",
+    "supports-hap",
+    "supports-matter"
   ],
   "main": "dist/index.js",
   "engines": {
@@ -50,6 +52,6 @@
     "vitest": "^4.1.4"
   },
   "dependencies": {
-    "@george.talusan/eufy-robovac-js": "^0.0.14"
+    "@george.talusan/eufy-robovac-js": "file:../eufy-robovac-js"
   }
 }
