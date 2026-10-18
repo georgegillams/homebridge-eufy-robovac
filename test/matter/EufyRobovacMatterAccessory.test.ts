@@ -198,7 +198,6 @@ describe('EufyRobovacMatterAccessory', () => {
     it('should call robovac.pause()', async () => {
       const accessory = makeAccessory({}, { docked: false, activity: 'Running' });
       robovac.connected = true;
-      // Set state to running first
       await accessory.updateOperationalState(1);
       await accessory.handlers!.rvcOperationalState.pause();
       expect(robovac.pause).toHaveBeenCalled();
@@ -209,6 +208,17 @@ describe('EufyRobovacMatterAccessory', () => {
       robovac.connected = true;
       await accessory.updateOperationalState(1);
       await accessory.handlers!.rvcOperationalState.pause();
+      expect(accessory.getOperationalState()).toBe(2);
+    });
+
+    it('should pause via DPS 122 when workStatus2 is present', async () => {
+      const accessory = makeAccessory({}, { docked: false, activity: 'Running' });
+      robovac.connected = true;
+      robovac.dps = { '2': true, '122': 'Continue' };
+      await accessory.updateOperationalState(1);
+      await accessory.handlers!.rvcOperationalState.pause();
+      expect(robovac.pause).toHaveBeenCalled();
+      expect(robovac.dps['122']).toBe('Pause');
       expect(accessory.getOperationalState()).toBe(2);
     });
 
@@ -456,7 +466,11 @@ describe('EufyRobovacMatterAccessory', () => {
       await Promise.resolve();
 
       expect(api.matter.updateAccessoryState).toHaveBeenCalledWith(
-        accessory.UUID, 'powerSource', { batPercentRemaining: 150, batChargeLevel: 0 }, undefined,
+        accessory.UUID, 'powerSource', {
+          batPercentRemaining: 150,
+          batChargeLevel: 0,
+          batChargeState: 1,
+        }, undefined,
       );
       expect(api.matter.updateAccessoryState).toHaveBeenCalledWith(
         accessory.UUID, 'rvcOperationalState', { operationalState: 65 }, undefined,
@@ -479,7 +493,7 @@ describe('EufyRobovacMatterAccessory', () => {
         accessory.UUID, 'rvcOperationalState', { operationalState: 66 }, undefined,
       );
       expect(api.matter.updateAccessoryState).toHaveBeenCalledWith(
-        accessory.UUID, 'powerSource', { batChargeState: 3 }, undefined,
+        accessory.UUID, 'powerSource', { batChargeState: 2 }, undefined,
       );
     });
     it('should NOT update powerSource on tuya.data event when Matter is not ready', () => {
@@ -505,7 +519,11 @@ describe('EufyRobovacMatterAccessory', () => {
       robovac.emit('tuya.data');
 
       expect(api.matter.updateAccessoryState).toHaveBeenCalledWith(
-        accessory.UUID, 'powerSource', { batPercentRemaining: 100, batChargeLevel: 0 }, undefined,
+        accessory.UUID, 'powerSource', {
+          batPercentRemaining: 100,
+          batChargeLevel: 0,
+          batChargeState: 1,
+        }, undefined,
       );
     });
 
@@ -518,7 +536,11 @@ describe('EufyRobovacMatterAccessory', () => {
       robovac.emit('event', { command: 'battery', value: 15 });
 
       expect(api.matter.updateAccessoryState).toHaveBeenCalledWith(
-        accessory.UUID, 'powerSource', { batPercentRemaining: 30, batChargeLevel: 2 }, undefined,
+        accessory.UUID, 'powerSource', {
+          batPercentRemaining: 30,
+          batChargeLevel: 2,
+          batChargeState: expect.any(Number),
+        }, undefined,
       );
     });
 
@@ -602,6 +624,228 @@ describe('EufyRobovacMatterAccessory', () => {
       );
     });
 
+    it('should set operationalState=1 (Running) when activity=Cleaning and playPause=true', () => {
+      robovac = createMockRoboVac({ activity: 'Cleaning', docked: false });
+      robovac.dps = { '2': true };
+      config = createMockConfig();
+      const accessory = new EufyRobovacMatterAccessory(api, log, config, robovac);
+      accessory.setMatterReady();
+
+      robovac.emit('tuya.data');
+
+      expect(api.matter.updateAccessoryState).toHaveBeenCalledWith(
+        accessory.UUID, 'rvcOperationalState', { operationalState: 1 }, undefined,
+      );
+      expect(api.matter.updateAccessoryState).toHaveBeenCalledWith(
+        accessory.UUID, 'rvcRunMode', { currentMode: 1 }, undefined,
+      );
+    });
+
+    it('should set operationalState=2 (Paused) when activity=Cleaning and playPause=false (Eufy app pause)', () => {
+      robovac = createMockRoboVac({ activity: 'Cleaning', docked: false });
+      robovac.dps = { '2': false };
+      config = createMockConfig();
+      const accessory = new EufyRobovacMatterAccessory(api, log, config, robovac);
+      accessory.setMatterReady();
+
+      robovac.emit('tuya.data');
+
+      expect(api.matter.updateAccessoryState).toHaveBeenCalledWith(
+        accessory.UUID, 'rvcOperationalState', { operationalState: 2 }, undefined,
+      );
+    });
+
+    it('should set operationalState=2 (Paused) when workStatus2=Pause (X8 Eufy app pause)', () => {
+      robovac = createMockRoboVac({ activity: 'Running', docked: false });
+      robovac.dps = { '2': true, '15': 'Running', '122': 'Pause' };
+      config = createMockConfig();
+      const accessory = new EufyRobovacMatterAccessory(api, log, config, robovac);
+      accessory.setMatterReady();
+
+      robovac.emit('tuya.dp-refresh', { dps: { '122': 'Pause' } });
+
+      expect(api.matter.updateAccessoryState).toHaveBeenCalledWith(
+        accessory.UUID, 'rvcOperationalState', { operationalState: 2 }, undefined,
+      );
+    });
+
+    it('should set operationalState=1 (Running) when workStatus2 returns to Continue', async () => {
+      robovac = createMockRoboVac({ activity: 'Running', docked: false });
+      robovac.dps = { '2': true, '122': 'Pause' };
+      config = createMockConfig();
+      const accessory = new EufyRobovacMatterAccessory(api, log, config, robovac);
+      accessory.setMatterReady();
+      await accessory.updateOperationalState(2);
+      (api.matter.updateAccessoryState as ReturnType<typeof vi.fn>).mockClear();
+
+      robovac.dps = { '2': true, '122': 'Continue' };
+      robovac.emit('tuya.dp-refresh', { dps: { '122': 'Continue' } });
+
+      expect(api.matter.updateAccessoryState).toHaveBeenCalledWith(
+        accessory.UUID, 'rvcOperationalState', { operationalState: 1 }, undefined,
+      );
+    });
+
+    it('should set operationalState=2 (Paused) when activity=Cleaning and alternate playPause DPS 151 is false (X8 Pro)', () => {
+      robovac = createMockRoboVac({ activity: 'Cleaning', docked: false });
+      robovac.dps = { '151': false };
+      config = createMockConfig();
+      const accessory = new EufyRobovacMatterAccessory(api, log, config, robovac);
+      accessory.setMatterReady();
+
+      robovac.emit('tuya.data');
+
+      expect(api.matter.updateAccessoryState).toHaveBeenCalledWith(
+        accessory.UUID, 'rvcOperationalState', { operationalState: 2 }, undefined,
+      );
+    });
+
+    it('should set operationalState=1 (Running) when activity=Cleaning resumes with playPause=true', async () => {
+      robovac = createMockRoboVac({ activity: 'Cleaning', docked: false });
+      robovac.dps = { '151': false };
+      config = createMockConfig();
+      const accessory = new EufyRobovacMatterAccessory(api, log, config, robovac);
+      accessory.setMatterReady();
+      await accessory.updateOperationalState(2); // paused
+      (api.matter.updateAccessoryState as ReturnType<typeof vi.fn>).mockClear();
+
+      robovac.dps = { '151': true };
+      robovac.emit('tuya.data');
+
+      expect(api.matter.updateAccessoryState).toHaveBeenCalledWith(
+        accessory.UUID, 'rvcOperationalState', { operationalState: 1 }, undefined,
+      );
+      expect(api.matter.updateAccessoryState).toHaveBeenCalledWith(
+        accessory.UUID, 'rvcRunMode', { currentMode: 1 }, undefined,
+      );
+    });
+
+    it('should set operationalState=0 (Stopped) on event { command: activity, value: StandingBy }', () => {
+      robovac = createMockRoboVac({ activity: 'Cleaning', docked: false });
+      config = createMockConfig();
+      const accessory = new EufyRobovacMatterAccessory(api, log, config, robovac);
+      accessory.setMatterReady();
+
+      robovac.emit('event', { command: 'activity', value: 'StandingBy' });
+
+      expect(api.matter.updateAccessoryState).toHaveBeenCalledWith(
+        accessory.UUID, 'rvcOperationalState', { operationalState: 0 }, undefined,
+      );
+      expect(api.matter.updateAccessoryState).toHaveBeenCalledWith(
+        accessory.UUID, 'rvcRunMode', { currentMode: 0 }, undefined,
+      );
+    });
+
+    it('should set operationalState=0 (Stopped) when activity=standby (X8 job ended)', () => {
+      robovac = createMockRoboVac({ activity: 'standby', docked: false });
+      robovac.dps = { '2': false };
+      config = createMockConfig();
+      const accessory = new EufyRobovacMatterAccessory(api, log, config, robovac);
+      accessory.setMatterReady();
+
+      robovac.emit('tuya.data');
+
+      expect(api.matter.updateAccessoryState).toHaveBeenCalledWith(
+        accessory.UUID, 'rvcOperationalState', { operationalState: 0 }, undefined,
+      );
+      expect(api.matter.updateAccessoryState).toHaveBeenCalledWith(
+        accessory.UUID, 'rvcRunMode', { currentMode: 0 }, undefined,
+      );
+    });
+
+    it('should prefer alt playPause DPS 151 when classic DPS 2 disagrees', () => {
+      robovac = createMockRoboVac({ activity: 'Running', docked: false });
+      // Stale classic true + live alt false (paused)
+      robovac.dps = { '2': true, '151': false };
+      config = createMockConfig();
+      const accessory = new EufyRobovacMatterAccessory(api, log, config, robovac);
+      accessory.setMatterReady();
+
+      robovac.emit('tuya.data');
+
+      expect(api.matter.updateAccessoryState).toHaveBeenCalledWith(
+        accessory.UUID, 'rvcOperationalState', { operationalState: 2 }, undefined,
+      );
+    });
+
+    it('should not error when activity() throws (DPS 15 not yet available)', () => {
+      robovac = createMockRoboVac({ docked: true });
+      robovac.activity = vi.fn().mockImplementation(() => {
+        throw new Error('RoboVac does not support this command');
+      });
+      robovac.dps = { '2': false };
+      config = createMockConfig();
+      const accessory = new EufyRobovacMatterAccessory(api, log, config, robovac);
+      accessory.setMatterReady();
+
+      robovac.emit('tuya.data');
+
+      expect(log.error).not.toHaveBeenCalledWith(
+        expect.stringContaining('Failed to sync operational state'),
+        expect.anything(),
+      );
+      // playPause=false without activity → Stopped (0), not Charging/Docked (resume-safe).
+      expect(api.matter.updateAccessoryState).toHaveBeenCalledWith(
+        accessory.UUID, 'rvcOperationalState', { operationalState: 0 }, undefined,
+      );
+    });
+
+    it('should keep Paused when activity unavailable after a pause (playPause false)', async () => {
+      robovac = createMockRoboVac({ docked: false, activity: 'Running' });
+      config = createMockConfig();
+      const accessory = new EufyRobovacMatterAccessory(api, log, config, robovac);
+      accessory.setMatterReady();
+      await accessory.updateOperationalState(2); // paused
+      (api.matter.updateAccessoryState as ReturnType<typeof vi.fn>).mockClear();
+
+      robovac.activity = vi.fn().mockImplementation(() => {
+        throw new Error('RoboVac does not support this command');
+      });
+      robovac.dps = { '2': false };
+      robovac.emit('tuya.data');
+
+      expect(api.matter.updateAccessoryState).toHaveBeenCalledWith(
+        accessory.UUID, 'rvcOperationalState', { operationalState: 2 }, undefined,
+      );
+    });
+
+    it('should fall back to Running when activity unavailable and playPause is true', () => {
+      robovac = createMockRoboVac({ docked: false });
+      robovac.activity = vi.fn().mockReturnValue('unknown');
+      robovac.goingHome = vi.fn().mockImplementation(() => {
+        throw new Error('RoboVac does not support this command');
+      });
+      robovac.dps = { '2': true };
+      config = createMockConfig();
+      const accessory = new EufyRobovacMatterAccessory(api, log, config, robovac);
+      accessory.setMatterReady();
+
+      robovac.emit('tuya.data');
+
+      expect(api.matter.updateAccessoryState).toHaveBeenCalledWith(
+        accessory.UUID, 'rvcOperationalState', { operationalState: 1 }, undefined,
+      );
+      expect(api.matter.updateAccessoryState).toHaveBeenCalledWith(
+        accessory.UUID, 'rvcRunMode', { currentMode: 1 }, undefined,
+      );
+    });
+
+    it('should fall back to SeekingCharger when activity unavailable and goingHome is true', () => {
+      robovac = createMockRoboVac({ goingHome: true, docked: false });
+      robovac.activity = vi.fn().mockImplementation(() => {
+        throw new Error('RoboVac does not support this command');
+      });
+      config = createMockConfig();
+      const accessory = new EufyRobovacMatterAccessory(api, log, config, robovac);
+      accessory.setMatterReady();
+
+      robovac.emit('tuya.data');
+
+      expect(api.matter.updateAccessoryState).toHaveBeenCalledWith(
+        accessory.UUID, 'rvcOperationalState', { operationalState: 64 }, undefined,
+      );
+    });
+
     it('should transition to Docked(66) on event { command: activity, value: Sleeping } (dp-refresh docking)', () => {
       robovac = createMockRoboVac({ goingHome: true, docked: false, activity: 'Running' });
       config = createMockConfig();
@@ -669,7 +913,9 @@ describe('EufyRobovacMatterAccessory', () => {
       void accessory;
     });
 
-    it('should set operationalState=2 (Paused) on event { command: playPause, value: false }', () => {
+    it('should set operationalState=2 (Paused) on playPause=false while activity still Running', () => {
+      robovac = createMockRoboVac({ activity: 'Running', docked: false });
+      robovac.dps = { '2': false };
       config = createMockConfig();
       const accessory = new EufyRobovacMatterAccessory(api, log, config, robovac);
       accessory.setMatterReady();
@@ -681,7 +927,9 @@ describe('EufyRobovacMatterAccessory', () => {
       );
     });
 
-    it('should set operationalState=1 (Running) on event { command: playPause, value: true }', () => {
+    it('should set operationalState=1 (Running) on playPause=true while activity=Running', () => {
+      robovac = createMockRoboVac({ activity: 'Running', docked: false });
+      robovac.dps = { '2': true };
       config = createMockConfig();
       const accessory = new EufyRobovacMatterAccessory(api, log, config, robovac);
       accessory.setMatterReady();
@@ -691,6 +939,16 @@ describe('EufyRobovacMatterAccessory', () => {
       expect(api.matter.updateAccessoryState).toHaveBeenCalledWith(
         accessory.UUID, 'rvcOperationalState', { operationalState: 1 }, undefined,
       );
+    });
+
+    it('should start a new clean on resume when device is already standby', async () => {
+      const accessory = makeAccessory({}, { docked: false, activity: 'standby' });
+      robovac.dps = { '2': false, '15': 'standby' };
+      await accessory.updateOperationalState(2); // controller still thinks paused
+      await accessory.handlers!.rvcOperationalState.resume();
+      expect(robovac.clean).toHaveBeenCalled();
+      expect(robovac.resume).not.toHaveBeenCalled();
+      expect(accessory.getOperationalState()).toBe(1);
     });
 
     it('should set operationalState=1 (Running) and runMode=1 (Cleaning) on coverage event when not already running', () => {
@@ -837,6 +1095,56 @@ describe('EufyRobovacMatterAccessory', () => {
       const cleanModeUpdates = (api.matter.updateAccessoryState as ReturnType<typeof vi.fn>)
         .mock.calls.filter((c: unknown[]) => c[1] === 'rvcCleanMode');
       expect(cleanModeUpdates).toHaveLength(0);
+    });
+
+    it('should poll robovac.refresh periodically and pick up Eufy app pause via playPause', async () => {
+      vi.useFakeTimers();
+      robovac = createMockRoboVac({ activity: 'Cleaning', docked: false });
+      robovac.dps = { '151': true };
+      config = createMockConfig({ stateRefreshInterval: 15 });
+      const accessory = new EufyRobovacMatterAccessory(api, log, config, robovac);
+      accessory.setMatterReady();
+
+      robovac.refresh = vi.fn().mockImplementation(async () => {
+        robovac.dps = { '151': false };
+      });
+      (api.matter.updateAccessoryState as ReturnType<typeof vi.fn>).mockClear();
+
+      await vi.advanceTimersByTimeAsync(15_000);
+
+      expect(robovac.refresh).toHaveBeenCalled();
+      expect(api.matter.updateAccessoryState).toHaveBeenCalledWith(
+        accessory.UUID, 'rvcOperationalState', { operationalState: 2 }, undefined,
+      );
+      vi.useRealTimers();
+    });
+
+    it('should not start polling when stateRefreshInterval is 0', async () => {
+      vi.useFakeTimers();
+      robovac = createMockRoboVac({ activity: 'Cleaning', docked: false });
+      config = createMockConfig({ stateRefreshInterval: 0 });
+      new EufyRobovacMatterAccessory(api, log, config, robovac).setMatterReady();
+
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      expect(robovac.refresh).not.toHaveBeenCalled();
+      vi.useRealTimers();
+    });
+
+    it('should sync on tuya.dp-refresh with operational DPS', () => {
+      robovac = createMockRoboVac({ activity: 'Cleaning', docked: false });
+      robovac.dps = { '151': true };
+      config = createMockConfig();
+      const accessory = new EufyRobovacMatterAccessory(api, log, config, robovac);
+      accessory.setMatterReady();
+      (api.matter.updateAccessoryState as ReturnType<typeof vi.fn>).mockClear();
+
+      robovac.dps = { '151': false };
+      robovac.emit('tuya.dp-refresh', { dps: { '151': false } });
+
+      expect(api.matter.updateAccessoryState).toHaveBeenCalledWith(
+        accessory.UUID, 'rvcOperationalState', { operationalState: 2 }, undefined,
+      );
     });
   });
 });
